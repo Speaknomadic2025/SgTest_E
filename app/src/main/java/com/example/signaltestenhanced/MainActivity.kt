@@ -5,36 +5,38 @@ import android.annotation.SuppressLint
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.graphics.Color
 import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
-import android.net.ConnectivityManager
-import android.net.NetworkCapabilities
+import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.PowerManager
 import android.provider.Settings
 import android.telephony.*
+import android.util.Log
+import android.view.Gravity
 import android.widget.*
-import androidx.activity.ComponentActivity
-import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
+import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.*
 import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
-import java.net.InetAddress
 import java.net.NetworkInterface
 import java.net.URL
 import java.text.SimpleDateFormat
 import java.util.*
 import java.util.concurrent.Executors
-import kotlin.collections.ArrayList
+import java.util.concurrent.TimeUnit
 
-class MainActivity : ComponentActivity(), LocationListener {
+class MainActivity : AppCompatActivity(), LocationListener {
 
     private lateinit var statusText: TextView
     private lateinit var signalText: TextView
@@ -47,7 +49,6 @@ class MainActivity : ComponentActivity(), LocationListener {
 
     private lateinit var telephonyManager: TelephonyManager
     private lateinit var locationManager: LocationManager
-    private lateinit var connectivityManager: ConnectivityManager
     private lateinit var wifiManager: WifiManager
 
     private var isMonitoring = false
@@ -56,36 +57,40 @@ class MainActivity : ComponentActivity(), LocationListener {
     private var useHttps = false
     private var currentLocation: Location? = null
 
-    private val handler = Handler(Looper.getMainLooper( ))
+    private val handler = Handler(Looper.getMainLooper())
     private val executor = Executors.newFixedThreadPool(4)
 
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { permissions ->
-        val allGranted = permissions.all { it.value }
-        if (allGranted) {
-            statusText.text = "✅ All permissions granted"
-            initializeServices()
-        } else {
-            statusText.text = "❌ Some permissions denied"
-            Toast.makeText(this, "All permissions are required for the app to work properly", Toast.LENGTH_LONG).show()
-        }
+    companion object {
+        private const val PERMISSION_REQUEST_CODE = 1001
+        private const val MONITORING_INTERVAL = 3000L
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Create UI programmatically
-        createUI()
+        try {
+            // Initialize services
+            telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
+            locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
+            wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
-        // Initialize device ID
-        deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+            // Initialize device ID
+            deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
 
-        // Request permissions
-        requestPermissions()
+            // Create UI
+            createUI()
+
+            // Request permissions
+            requestPermissions()
+
+        } catch (e: Exception) {
+            Log.e("MainActivity", "Error in onCreate: ${e.message}")
+            showErrorDialog("Initialization Error", e.message ?: "Unknown error")
+        }
     }
 
     private fun createUI() {
+        val scrollView = ScrollView(this)
         val layout = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setPadding(32, 32, 32, 32)
@@ -95,6 +100,8 @@ class MainActivity : ComponentActivity(), LocationListener {
         val title = TextView(this).apply {
             text = "📡 Enhanced Signal Monitor"
             textSize = 24f
+            setTextColor(Color.BLACK)
+            gravity = Gravity.CENTER
             setPadding(0, 0, 0, 32)
         }
         layout.addView(title)
@@ -103,19 +110,23 @@ class MainActivity : ComponentActivity(), LocationListener {
         statusText = TextView(this).apply {
             text = "🔄 Initializing..."
             textSize = 16f
-            setPadding(0, 0, 0, 16)
+            setTextColor(Color.DKGRAY)
+            setPadding(16, 16, 16, 16)
+            setBackgroundColor(Color.parseColor("#f0f0f0"))
         }
         layout.addView(statusText)
 
         // HTTPS Toggle
-        val httpsLayout = LinearLayout(this ).apply {
+        val httpsLayout = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 16, 0, 16)
         }
-        val httpsLabel = TextView(this ).apply {
+        val httpsLabel = TextView(this).apply {
             text = "🔒 HTTPS Mode: "
             textSize = 16f
+            setTextColor(Color.BLACK)
         }
-        httpsSwitch = Switch(this ).apply {
+        httpsSwitch = Switch(this).apply {
             setOnCheckedChangeListener { _, isChecked ->
                 useHttps = isChecked
                 if (serverUrl.isNotEmpty()) {
@@ -123,15 +134,17 @@ class MainActivity : ComponentActivity(), LocationListener {
                 }
             }
         }
-        httpsLayout.addView(httpsLabel )
-        httpsLayout.addView(httpsSwitch )
-        layout.addView(httpsLayout )
+        httpsLayout.addView(httpsLabel)
+        httpsLayout.addView(httpsSwitch)
+        layout.addView(httpsLayout)
 
         // Signal info
         signalText = TextView(this).apply {
             text = "📶 Signal: Not available"
             textSize = 14f
-            setPadding(0, 16, 0, 8)
+            setTextColor(Color.DKGRAY)
+            setPadding(16, 16, 16, 16)
+            setBackgroundColor(Color.parseColor("#f8f8f8"))
         }
         layout.addView(signalText)
 
@@ -139,37 +152,47 @@ class MainActivity : ComponentActivity(), LocationListener {
         locationText = TextView(this).apply {
             text = "📍 Location: Not available"
             textSize = 14f
-            setPadding(0, 0, 0, 16)
+            setTextColor(Color.DKGRAY)
+            setPadding(16, 16, 16, 16)
+            setBackgroundColor(Color.parseColor("#f8f8f8"))
         }
         layout.addView(locationText)
 
         // Buttons
+        val buttonLayout = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(0, 24, 0, 16)
+        }
+
         startButton = Button(this).apply {
             text = "START MONITORING"
             setOnClickListener { startMonitoring() }
         }
-        layout.addView(startButton)
+        buttonLayout.addView(startButton)
 
         stopButton = Button(this).apply {
             text = "STOP MONITORING"
             setOnClickListener { stopMonitoring() }
             isEnabled = false
         }
-        layout.addView(stopButton)
+        buttonLayout.addView(stopButton)
 
         backgroundButton = Button(this).apply {
             text = "START BACKGROUND MONITORING"
             setOnClickListener { startBackgroundMonitoring() }
         }
-        layout.addView(backgroundButton)
+        buttonLayout.addView(backgroundButton)
 
         batteryButton = Button(this).apply {
             text = "DISABLE BATTERY OPTIMIZATION"
             setOnClickListener { requestBatteryOptimization() }
         }
-        layout.addView(batteryButton)
+        buttonLayout.addView(batteryButton)
 
-        setContentView(layout)
+        layout.addView(buttonLayout)
+
+        scrollView.addView(layout)
+        setContentView(scrollView)
     }
 
     private fun requestPermissions() {
@@ -190,19 +213,20 @@ class MainActivity : ComponentActivity(), LocationListener {
             permissions.add(Manifest.permission.POST_NOTIFICATIONS)
         }
 
-        permissionLauncher.launch(permissions.toTypedArray())
+        val missingPermissions = permissions.filter {
+            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+        }
+
+        if (missingPermissions.isNotEmpty()) {
+            ActivityCompat.requestPermissions(this, missingPermissions.toTypedArray(), PERMISSION_REQUEST_CODE)
+        } else {
+            initializeServices()
+        }
     }
 
     private fun initializeServices() {
-        telephonyManager = getSystemService(Context.TELEPHONY_SERVICE) as TelephonyManager
-        locationManager = getSystemService(Context.LOCATION_SERVICE) as LocationManager
-        connectivityManager = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
-        wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
-
-        // Start server discovery
+        statusText.text = "✅ All permissions granted"
         discoverServer()
-
-        // Start location updates
         startLocationUpdates()
     }
 
@@ -210,7 +234,7 @@ class MainActivity : ComponentActivity(), LocationListener {
         statusText.text = "🔍 Discovering server..."
 
         CoroutineScope(Dispatchers.IO).launch {
-            val discoveredUrl = performServerDiscovery()
+            val discoveredUrl = performUniversalServerDiscovery()
 
             withContext(Dispatchers.Main) {
                 if (discoveredUrl.isNotEmpty()) {
@@ -224,90 +248,132 @@ class MainActivity : ComponentActivity(), LocationListener {
         }
     }
 
-    private suspend fun performServerDiscovery(): String {
+    private suspend fun performUniversalServerDiscovery(): String {
         val protocol = if (useHttps) "https" else "http"
         val port = 5000
 
-        // Method 1: Try WiFi network discovery
-        val wifiUrl = discoverViaWiFiNetwork(protocol, port )
-        if (wifiUrl.isNotEmpty()) return wifiUrl
+        // Method 1: Priority IP scanning (including 192.168.23.35)
+        val priorityResult = discoverViaPriorityIPs(protocol, port)
+        if (priorityResult.isNotEmpty()) return priorityResult
 
-        // Method 2: Try network interface discovery
-        val interfaceUrl = discoverViaNetworkInterface(protocol, port)
-        if (interfaceUrl.isNotEmpty()) return interfaceUrl
+        // Method 2: Universal subnet scanning
+        val subnetResult = discoverViaUniversalScanning(protocol, port)
+        if (subnetResult.isNotEmpty()) return subnetResult
 
-        // Method 3: Try common IP patterns
-        val commonUrl = discoverViaCommonIPs(protocol, port)
-        if (commonUrl.isNotEmpty()) return commonUrl
-
-        // Method 4: Try localhost fallback
-        val localhostUrl = testServerConnection("$protocol://localhost:$port")
-        if (localhostUrl.isNotEmpty()) return localhostUrl
+        // Method 3: Network interface analysis
+        val interfaceResult = discoverViaNetworkInterface(protocol, port)
+        if (interfaceResult.isNotEmpty()) return interfaceResult
 
         return ""
     }
 
-    private suspend fun discoverViaWiFiNetwork(protocol: String, port: Int): String {
-        try {
-            val wifiInfo = wifiManager.connectionInfo
-            val ipAddress = wifiInfo.ipAddress
+    private suspend fun discoverViaPriorityIPs(protocol: String, port: Int): String {
+        return withContext(Dispatchers.IO) {
+            // Priority networks and IPs based on your server location
+            val priorityTests = listOf(
+                "192.168.23.35",  // Your exact server IP
+                "192.168.23.1",
+                "192.168.23.10",
+                "192.168.23.100",
+                "192.168.1.35",
+                "192.168.1.1",
+                "192.168.0.35",
+                "192.168.0.1",
+                "10.0.0.35",
+                "10.0.0.1"
+            )
 
-            if (ipAddress != 0) {
-                val ip = String.format(
-                    "%d.%d.%d.%d",
-                    ipAddress and 0xff,
-                    ipAddress shr 8 and 0xff,
-                    ipAddress shr 16 and 0xff,
-                    ipAddress shr 24 and 0xff
-                )
+            for (ip in priorityTests) {
+                val testUrl = "$protocol://$ip:$port"
+                if (testServerConnection(testUrl).isNotEmpty()) {
 
-                val subnet = ip.substring(0, ip.lastIndexOf('.'))
-                val testIPs = listOf(35, 100, 1, 10, 50, 20, 30, 40, 60, 70, 80, 90, 101, 200)
-
-                return testIPsInParallel(protocol, port, subnet, testIPs)
+                    return@withContext testUrl
+                }
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
+            ""
         }
-        return ""
+    }
+
+    private suspend fun discoverViaUniversalScanning(protocol: String, port: Int): String {
+        return withContext(Dispatchers.IO) {
+            try {
+                // Get all network interfaces and extract subnets
+                val subnets = mutableSetOf<String>()
+
+                // WiFi subnet
+                try {
+                    val wifiInfo = wifiManager.connectionInfo
+                    val ipAddress = wifiInfo.ipAddress
+                    if (ipAddress != 0) {
+                        val ip = String.format(
+                            "%d.%d.%d.%d",
+                            ipAddress and 0xff,
+                            ipAddress shr 8 and 0xff,
+                            ipAddress shr 16 and 0xff,
+                            ipAddress shr 24 and 0xff
+                        )
+                        subnets.add(ip.substring(0, ip.lastIndexOf('.')))
+                    }
+                } catch (e: Exception) {
+                    Log.w("MainActivity", "WiFi subnet error: ${e.message}")
+                }
+
+                // Network interface subnets
+                try {
+                    val interfaces = NetworkInterface.getNetworkInterfaces()
+                    for (networkInterface in interfaces) {
+                        if (!networkInterface.isLoopback && networkInterface.isUp) {
+                            for (address in networkInterface.inetAddresses) {
+                                if (!address.isLoopbackAddress && address.hostAddress?.contains(':') == false) {
+                                    val ip = address.hostAddress
+                                    subnets.add(ip.substring(0, ip.lastIndexOf('.')))
+                                }
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.w("MainActivity", "Interface subnet error: ${e.message}")
+                }
+
+                // Scan each subnet with priority IPs (including 35)
+                for (subnet in subnets) {
+                    val result = scanSubnetParallel(protocol, port, subnet, listOf(35, 1, 10, 100, 50, 20, 30, 40, 60, 70, 80, 90))
+                    if (result.isNotEmpty()) return@withContext result
+                }
+
+                ""
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Universal scanning error: ${e.message}")
+                ""
+            }
+        }
     }
 
     private suspend fun discoverViaNetworkInterface(protocol: String, port: Int): String {
-        try {
-            val interfaces = NetworkInterface.getNetworkInterfaces()
-
-            for (networkInterface in interfaces) {
-                if (!networkInterface.isUp || networkInterface.isLoopback) continue
-
-                for (address in networkInterface.inetAddresses) {
-                    if (address.isLoopbackAddress || address.hostAddress.contains(":")) continue
-
-                    val ip = address.hostAddress
-                    val subnet = ip.substring(0, ip.lastIndexOf('.'))
-                    val testIPs = listOf(35, 100, 1, 10, 50, 20, 30, 40)
-
-                    val result = testIPsInParallel(protocol, port, subnet, testIPs)
-                    if (result.isNotEmpty()) return result
+        return withContext(Dispatchers.IO) {
+            try {
+                val interfaces = NetworkInterface.getNetworkInterfaces()
+                for (networkInterface in interfaces) {
+                    if (!networkInterface.isLoopback && networkInterface.isUp) {
+                        for (address in networkInterface.inetAddresses) {
+                            if (!address.isLoopbackAddress && address.hostAddress?.contains(':') == false) {
+                                val ip = address.hostAddress
+                                val subnet = ip.substring(0, ip.lastIndexOf('.'))
+                                val result = scanSubnetParallel(protocol, port, subnet, listOf(35, 1, 10, 100, 50))
+                                if (result.isNotEmpty()) return@withContext result
+                            }
+                        }
+                    }
                 }
+                ""
+            } catch (e: Exception) {
+                Log.e("MainActivity", "Interface discovery error: ${e.message}")
+                ""
             }
-        } catch (e: Exception) {
-            e.printStackTrace()
         }
-        return ""
     }
 
-    private suspend fun discoverViaCommonIPs(protocol: String, port: Int): String {
-        val commonSubnets = listOf("192.168.1", "192.168.0", "192.168.23", "10.0.0", "172.16.0")
-        val testIPs = listOf(35, 100, 1, 10, 50, 20, 30, 40, 60, 70, 80, 90)
-
-        for (subnet in commonSubnets) {
-            val result = testIPsInParallel(protocol, port, subnet, testIPs)
-            if (result.isNotEmpty()) return result
-        }
-        return ""
-    }
-
-    private suspend fun testIPsInParallel(protocol: String, port: Int, subnet: String, ips: List<Int>): String {
+    private suspend fun scanSubnetParallel(protocol: String, port: Int, subnet: String, ips: List<Int>): String {
         return withContext(Dispatchers.IO) {
             val jobs = ips.map { ip ->
                 async {
@@ -328,16 +394,15 @@ class MainActivity : ComponentActivity(), LocationListener {
 
     private fun testServerConnection(url: String): String {
         return try {
-            val connection = URL("$url/api/server/info").openConnection() as HttpURLConnection
+            val connection = URL("$url/api/devices").openConnection() as HttpURLConnection
             connection.requestMethod = "GET"
             connection.connectTimeout = 100
             connection.readTimeout = 100
 
-            if (connection.responseCode == 200) {
-                url
-            } else {
-                ""
-            }
+            val responseCode = connection.responseCode
+            connection.disconnect()
+
+            if (responseCode in 200..299 || responseCode == 404) url else ""
         } catch (e: Exception) {
             ""
         }
@@ -354,7 +419,7 @@ class MainActivity : ComponentActivity(), LocationListener {
                     put("device_model", Build.MODEL)
                     put("android_version", Build.VERSION.RELEASE)
                     put("app_status", "running")
-                    put("https_enabled", useHttps )
+                    put("https_enabled", useHttps)
                     put("monitoring_mode", "foreground")
                     put("network_discovery_method", "universal_scanning")
                     put("app_version", "enhanced")
@@ -368,7 +433,7 @@ class MainActivity : ComponentActivity(), LocationListener {
 
                 sendDataToServer("/api/devices/register", deviceData)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("MainActivity", "Registration error: ${e.message}")
             }
         }
     }
@@ -377,27 +442,17 @@ class MainActivity : ComponentActivity(), LocationListener {
     private fun startLocationUpdates() {
         if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED) {
             try {
-                locationManager.requestLocationUpdates(
-                    LocationManager.GPS_PROVIDER,
-                    3000L,
-                    1f,
-                    this
-                )
-                locationManager.requestLocationUpdates(
-                    LocationManager.NETWORK_PROVIDER,
-                    3000L,
-                    1f,
-                    this
-                )
+                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 3000L, 1f, this)
+                locationManager.requestLocationUpdates(LocationManager.NETWORK_PROVIDER, 3000L, 1f, this)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("MainActivity", "Location updates error: ${e.message}")
             }
         }
     }
 
     private fun startMonitoring() {
         if (serverUrl.isEmpty()) {
-            Toast.makeText(this, "Server not connected", Toast.LENGTH_SHORT).show()
+            showErrorDialog("Server Error", "Server not connected")
             return
         }
 
@@ -405,7 +460,6 @@ class MainActivity : ComponentActivity(), LocationListener {
         startButton.isEnabled = false
         stopButton.isEnabled = true
 
-        // Start monitoring loop
         monitoringLoop()
     }
 
@@ -433,8 +487,12 @@ class MainActivity : ComponentActivity(), LocationListener {
     private fun requestBatteryOptimization() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS)
-            intent.data = android.net.Uri.parse("package:$packageName")
-            startActivity(intent)
+            intent.data = Uri.parse("package:$packageName")
+            try {
+                startActivity(intent)
+            } catch (e: Exception) {
+                Toast.makeText(this, "Battery optimization settings not available", Toast.LENGTH_SHORT).show()
+            }
         }
     }
 
@@ -444,7 +502,7 @@ class MainActivity : ComponentActivity(), LocationListener {
         updateSignalInfo()
         sendSignalData()
 
-        handler.postDelayed({ monitoringLoop() }, 3000)
+        handler.postDelayed({ monitoringLoop() }, MONITORING_INTERVAL)
     }
 
     @SuppressLint("MissingPermission")
@@ -477,7 +535,7 @@ class MainActivity : ComponentActivity(), LocationListener {
             }
         } catch (e: Exception) {
             signalText.text = "📶 Signal: Error reading"
-            e.printStackTrace()
+            Log.e("MainActivity", "Signal update error: ${e.message}")
         }
     }
 
@@ -489,7 +547,7 @@ class MainActivity : ComponentActivity(), LocationListener {
                 val signalData = collectSignalData()
                 sendDataToServer("/api/devices/$deviceId/signal", signalData)
             } catch (e: Exception) {
-                e.printStackTrace()
+                Log.e("MainActivity", "Send signal error: ${e.message}")
             }
         }
     }
@@ -524,20 +582,18 @@ class MainActivity : ComponentActivity(), LocationListener {
                 data.put("carrier", telephonyManager.networkOperatorName ?: "Unknown")
             }
 
-            // Add location data
             currentLocation?.let {
                 data.put("latitude", it.latitude)
                 data.put("longitude", it.longitude)
                 data.put("accuracy", it.accuracy)
             }
 
-            // Add enhanced fields
-            data.put("https_enabled", useHttps )
+            data.put("https_enabled", useHttps)
             data.put("monitoring_mode", "foreground")
             data.put("background_service_active", false)
 
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("MainActivity", "Collect signal error: ${e.message}")
         }
 
         return data
@@ -551,17 +607,19 @@ class MainActivity : ComponentActivity(), LocationListener {
             connection.requestMethod = "POST"
             connection.setRequestProperty("Content-Type", "application/json")
             connection.doOutput = true
+            connection.connectTimeout = 5000
+            connection.readTimeout = 5000
 
-            val writer = OutputStreamWriter(connection.outputStream)
-            writer.write(data.toString())
-            writer.flush()
-            writer.close()
+            OutputStreamWriter(connection.outputStream).use { writer ->
+                writer.write(data.toString())
+                writer.flush()
+            }
 
             val responseCode = connection.responseCode
-            // Handle response if needed
+            Log.d("MainActivity", "Server response: $responseCode")
 
         } catch (e: Exception) {
-            e.printStackTrace()
+            Log.e("MainActivity", "Send data error: ${e.message}")
         }
     }
 
@@ -573,7 +631,6 @@ class MainActivity : ComponentActivity(), LocationListener {
 
         locationText.text = "📍 ${location.latitude}, ${location.longitude} (GPS)\n🎯 Accuracy: ±${location.accuracy.toInt()}m\n⏰ Updated: $timeString"
 
-        // Send location update to server
         if (serverUrl.isNotEmpty()) {
             CoroutineScope(Dispatchers.IO).launch {
                 try {
@@ -581,14 +638,35 @@ class MainActivity : ComponentActivity(), LocationListener {
                         put("latitude", location.latitude)
                         put("longitude", location.longitude)
                         put("accuracy", location.accuracy)
-                        put("https_enabled", useHttps )
+                        put("https_enabled", useHttps)
                     }
                     sendDataToServer("/api/devices/$deviceId/location", locationData)
                 } catch (e: Exception) {
-                    e.printStackTrace()
+                    Log.e("MainActivity", "Send location error: ${e.message}")
                 }
             }
         }
+    }
+
+    override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (requestCode == PERMISSION_REQUEST_CODE) {
+            val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            if (allGranted) {
+                initializeServices()
+            } else {
+                showErrorDialog("Permissions Required", "All permissions are required for the app to work properly")
+            }
+        }
+    }
+
+    private fun showErrorDialog(title: String, message: String) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("OK", null)
+            .show()
     }
 
     override fun onDestroy() {
