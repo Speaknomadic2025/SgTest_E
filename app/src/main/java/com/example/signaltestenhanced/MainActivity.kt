@@ -324,18 +324,23 @@ class MainActivity : AppCompatActivity(), LocationListener {
     private suspend fun testServerConnection(testUrl: String): Boolean {
         return withContext(Dispatchers.IO) {
             try {
-                val url = URL("$testUrl/api/devices")  // Changed from /health to /api/devices
+                Log.d("ServerTest", "Testing: $testUrl/api/devices")
+                val url = URL("$testUrl/api/devices")
                 val connection = url.openConnection() as HttpURLConnection
                 connection.requestMethod = "GET"
-                connection.connectTimeout = 2000
-                connection.readTimeout = 2000
+                connection.connectTimeout = 5000  // Increased from 2000
+                connection.readTimeout = 5000     // Increased from 2000
                 connection.setRequestProperty("Accept", "application/json")
 
                 val responseCode = connection.responseCode
+                Log.d("ServerTest", "Response from $testUrl: $responseCode")
                 connection.disconnect()
 
-                responseCode in 200..299 || responseCode == 404  // Accept 404 as server exists
+                val success = responseCode in 200..299 || responseCode == 404
+                Log.d("ServerTest", "Connection to $testUrl: ${if (success) "SUCCESS" else "FAILED"}")
+                success
             } catch (e: Exception) {
+                Log.e("ServerTest", "Connection failed to $testUrl: ${e.message}")
                 false
             }
         }
