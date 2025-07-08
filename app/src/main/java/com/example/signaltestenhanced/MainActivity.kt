@@ -80,8 +80,8 @@ class MainActivity : AppCompatActivity(), LocationListener {
             wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
             Log.d(TAG, "Services initialized successfully")
 
-            // Initialize device ID
-            deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
+            // Initialize device ID - FIXED TO MATCH DASHBOARD
+            deviceId = "debug_test_device"
             Log.d(TAG, "Device ID: $deviceId")
 
             // Create UI
