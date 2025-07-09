@@ -81,7 +81,8 @@ class MainActivity : AppCompatActivity(), LocationListener {
             Log.d(TAG, "Services initialized successfully")
 
             // Initialize device ID - FIXED TO MATCH DASHBOARD
-            deviceId = "debug_test_device"
+            deviceId = "R5CWC2CJTFW"
+
             Log.d(TAG, "Device ID: $deviceId")
 
             // Create UI
