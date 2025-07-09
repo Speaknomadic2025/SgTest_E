@@ -8,6 +8,7 @@ import android.location.Location
 import android.location.LocationListener
 import android.location.LocationManager
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -69,7 +70,7 @@ class MainActivity : AppCompatActivity(), LocationListener {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        Log.e("DEPLOYMENT_TEST", "MainActivity onCreate() - SIGNAL FIX VERSION!")
+        Log.e("DEPLOYMENT_TEST", "MainActivity onCreate() - ENHANCED 5G DETECTION VERSION 20250109_1400!")
         Log.d(TAG, "=== onCreate() STARTED ===")
 
         try {
@@ -353,14 +354,38 @@ class MainActivity : AppCompatActivity(), LocationListener {
                 return
             }
 
-            // Get all cell info
-            val cellInfoList = telephonyManager.allCellInfo
+            // Initialize variables
             var has4G = false
             var has5G = false
             var signal4G = "Not detected"
             var signal5G = "Not detected"
+            var bestSignalStrength = -999
+            var bestNetworkType = "Unknown"
+            var displayNetworkType = "Unknown"
 
+            // ENHANCED: Get network type information first
+            val dataNetworkType = telephonyManager.dataNetworkType
+            val voiceNetworkType = telephonyManager.voiceNetworkType
+
+            Log.d(TAG, "=== NETWORK TYPE ANALYSIS ===")
+            Log.d(TAG, "Data Network Type: $dataNetworkType")
+            Log.d(TAG, "Voice Network Type: $voiceNetworkType")
+
+            // Check for 5G network types
+            var is5GByNetworkType = false
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                is5GByNetworkType = (dataNetworkType == TelephonyManager.NETWORK_TYPE_NR) ||
+                        (voiceNetworkType == TelephonyManager.NETWORK_TYPE_NR)
+                Log.d(TAG, "5G by Network Type: $is5GByNetworkType (NETWORK_TYPE_NR = ${TelephonyManager.NETWORK_TYPE_NR})")
+            }
+
+            // Try to get cell info list - this can be null on real devices
+            val cellInfoList = telephonyManager.allCellInfo
+            Log.d(TAG, "CellInfoList: ${if (cellInfoList == null) "NULL" else "Available (${cellInfoList.size} cells)"}")
+
+            // Process cell info if available
             cellInfoList?.forEach { cellInfo ->
+                Log.d(TAG, "Processing cell: ${cellInfo.javaClass.simpleName}")
                 when (cellInfo) {
                     is CellInfoLte -> {
                         has4G = true
@@ -369,23 +394,119 @@ class MainActivity : AppCompatActivity(), LocationListener {
                         val rsrq = signalStrength.rsrq
                         signal4G = "RSRP: ${rsrp}dBm, RSRQ: ${rsrq}dB"
 
-                        // Set current signal strength for server
-                        currentSignalStrength = rsrp
-                        currentNetworkType = "LTE"
+                        // Use 4G signal if valid
+                        if (rsrp != Integer.MAX_VALUE && rsrp < 0 && rsrp > -150) {
+                            bestSignalStrength = rsrp
+                            bestNetworkType = "LTE"
+                            Log.d(TAG, "Valid 4G signal: ${rsrp}dBm")
+                        } else {
+                            Log.d(TAG, "Invalid 4G signal: ${rsrp}")
+                        }
                     }
                     is CellInfoNr -> {
                         has5G = true
+                        Log.d(TAG, "*** 5G CELL DETECTED via CellInfoNr! ***")
                         val signalStrength = cellInfo.cellSignalStrength as CellSignalStrengthNr
                         val ssRsrp = signalStrength.ssRsrp
                         val ssRsrq = signalStrength.ssRsrq
                         signal5G = "SS-RSRP: ${ssRsrp}dBm, SS-RSRQ: ${ssRsrq}dB"
 
-                        // Set current signal strength for server (prefer 5G)
-                        currentSignalStrength = ssRsrp
-                        currentNetworkType = "NR"
+                        // Prefer 5G signal if valid
+                        if (ssRsrp != Integer.MAX_VALUE && ssRsrp < 0 && ssRsrp > -150) {
+                            bestSignalStrength = ssRsrp
+                            bestNetworkType = "NR"
+                            Log.d(TAG, "Valid 5G signal: ${ssRsrp}dBm")
+                        } else {
+                            Log.d(TAG, "Invalid 5G signal: ${ssRsrp}")
+                        }
+                    }
+                    else -> {
+                        Log.d(TAG, "Other cell type: ${cellInfo.javaClass.simpleName}")
                     }
                 }
             }
+
+            // ENHANCED: Use network type as primary 5G detection method
+            if (is5GByNetworkType && !has5G) {
+                Log.d(TAG, "*** 5G DETECTED via Network Type (no CellInfoNr available) ***")
+                has5G = true
+                signal5G = "5G Network Active (via Network Type)"
+
+                // If we don't have a signal from CellInfoNr, try to get it from general signal strength
+                if (bestSignalStrength == -999) {
+                    try {
+                        val signalStrength = telephonyManager.signalStrength
+                        if (signalStrength != null) {
+                            // For 5G, try to get the best available signal
+                            val gsmSignalStrength = signalStrength.gsmSignalStrength
+                            if (gsmSignalStrength != 99) {
+                                val signalDbm = -113 + (2 * gsmSignalStrength)
+                                bestSignalStrength = signalDbm
+                                bestNetworkType = "NR"
+                                Log.d(TAG, "5G signal via fallback: ${signalDbm}dBm")
+                            }
+                        }
+                    } catch (e: Exception) {
+                        Log.e(TAG, "Error getting 5G fallback signal: ${e.message}")
+                    }
+                }
+            }
+
+            // FALLBACK: If cellInfoList is null or no valid signals found, use alternative methods
+            if (cellInfoList == null || bestSignalStrength == -999) {
+                Log.d(TAG, "Using fallback signal reading methods")
+
+                try {
+                    // Try to get signal strength directly from TelephonyManager
+                    val signalStrength = telephonyManager.signalStrength
+                    if (signalStrength != null) {
+                        // Get GSM signal strength (works for LTE too)
+                        val gsmSignalStrength = signalStrength.gsmSignalStrength
+                        if (gsmSignalStrength != 99) { // 99 means unknown
+                            // Convert GSM signal strength to dBm: dBm = -113 + 2 * asu
+                            val signalDbm = -113 + (2 * gsmSignalStrength)
+                            bestSignalStrength = signalDbm
+                            bestNetworkType = if (is5GByNetworkType) "NR" else "GSM/LTE"
+                            Log.d(TAG, "Fallback signal: ${signalDbm}dBm (ASU: ${gsmSignalStrength})")
+                        }
+
+                        // Try to get LTE signal strength if available (Android API 29+)
+                        try {
+                            val lteSignalStrength = signalStrength.cellSignalStrengths
+                                .filterIsInstance<CellSignalStrengthLte>()
+                                .firstOrNull()
+
+                            if (lteSignalStrength != null) {
+                                val rsrp = lteSignalStrength.rsrp
+                                if (rsrp != Integer.MAX_VALUE && rsrp < 0 && rsrp > -150) {
+                                    bestSignalStrength = rsrp
+                                    bestNetworkType = if (is5GByNetworkType) "NR" else "LTE"
+                                    Log.d(TAG, "Fallback LTE signal: ${rsrp}dBm")
+                                }
+                            }
+                        } catch (e: Exception) {
+                            Log.d(TAG, "LTE fallback not available: ${e.message}")
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error in fallback signal reading: ${e.message}")
+                }
+            }
+
+            // ENHANCED: Determine display network type with 5G priority
+            displayNetworkType = when {
+                has5G || is5GByNetworkType -> "5G NSA"  // 5G detected by any method
+                dataNetworkType == TelephonyManager.NETWORK_TYPE_NR -> "5G NR"
+                voiceNetworkType == TelephonyManager.NETWORK_TYPE_NR -> "5G NR"
+                has4G -> "LTE"
+                dataNetworkType == TelephonyManager.NETWORK_TYPE_LTE -> "LTE"
+                voiceNetworkType == TelephonyManager.NETWORK_TYPE_LTE -> "LTE"
+                else -> bestNetworkType
+            }
+
+            // Set current values for server
+            currentSignalStrength = bestSignalStrength
+            currentNetworkType = if (has5G || is5GByNetworkType) "NR" else bestNetworkType
 
             // Update UI
             signal4gText.text = "4G Signal: $signal4G"
@@ -394,14 +515,11 @@ class MainActivity : AppCompatActivity(), LocationListener {
             // Get carrier info
             currentCarrier = telephonyManager.networkOperatorName ?: "Unknown"
 
-            // Update general signal info
-            val networkType = when (telephonyManager.dataNetworkType) {
-                TelephonyManager.NETWORK_TYPE_LTE -> "LTE"
-                TelephonyManager.NETWORK_TYPE_NR -> "5G NR"
-                else -> "Other"
-            }
+            // Update general signal info with display values
+            generalSignalText.text = "Network: $displayNetworkType\nCarrier: $currentCarrier\nSignal: ${bestSignalStrength}dBm"
 
-            generalSignalText.text = "Network: $networkType\nCarrier: $currentCarrier\nSignal: ${currentSignalStrength}dBm"
+            Log.d(TAG, "Signal update complete - Strength: ${bestSignalStrength}dBm, Type: ${displayNetworkType}, Server: ${currentNetworkType}")
+            Log.d(TAG, "5G Detection Status: has5G=$has5G, has4G=$has4G, is5GByNetworkType=$is5GByNetworkType")
 
         } catch (e: Exception) {
             Log.e(TAG, "Error updating signal info: ${e.message}")
