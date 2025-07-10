@@ -32,6 +32,7 @@ import org.json.JSONObject
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import javax.net.ssl.HttpsURLConnection
 import kotlin.concurrent.thread
 
 class MainActivity : AppCompatActivity(), LocationListener {
@@ -67,6 +68,7 @@ class MainActivity : AppCompatActivity(), LocationListener {
     private var isMonitoring = false
     private var isServerAvailable = false
     private var serverBaseUrl = ""
+    private var connectionType = "Unknown"
     private var monitoringHandler: Handler? = null
     private var monitoringRunnable: Runnable? = null
 
@@ -82,7 +84,7 @@ class MainActivity : AppCompatActivity(), LocationListener {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        Log.d(TAG, "=== CLEAN COMPILE VERSION 20250109_1640 ===")
+        Log.d(TAG, "=== INTERNET READY VERSION 20250110_1200 ===")
         Log.d(TAG, "Android API Level: ${Build.VERSION.SDK_INT}")
 
         createUI()
@@ -98,7 +100,7 @@ class MainActivity : AppCompatActivity(), LocationListener {
 
         // App Title
         val titleText = TextView(this).apply {
-            text = "SignalTestEnhanced"
+            text = "SignalTestEnhanced - Internet Ready"
             textSize = 24f
             setTypeface(null, android.graphics.Typeface.BOLD)
             setPadding(0, 0, 0, 40)
@@ -608,18 +610,18 @@ class MainActivity : AppCompatActivity(), LocationListener {
         if (isMonitoring) return
 
         thread {
-            checkServerConnection()
+            discoverServer()
 
             runOnUiThread {
                 if (isServerAvailable) {
                     isMonitoring = true
                     startButton.isEnabled = false
                     stopButton.isEnabled = true
-                    statusText.text = "📡 Monitoring active..."
+                    statusText.text = "📡 Monitoring active via $connectionType..."
 
                     startPeriodicUpdates()
                 } else {
-                    showErrorDialog("Server Error", "Cannot connect to monitoring server at localhost:5000")
+                    showErrorDialog("Server Error", "Cannot connect to monitoring server. Please check your internet connection or ensure the local server is running.")
                 }
             }
         }
@@ -650,27 +652,84 @@ class MainActivity : AppCompatActivity(), LocationListener {
         monitoringHandler?.post(monitoringRunnable!!)
     }
 
-    private fun checkServerConnection() {
-        try {
-            val url = URL("http://localhost:5000/api/health")
-            val connection = url.openConnection() as HttpURLConnection
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 3000
-            connection.readTimeout = 3000
+    /**
+     * Enhanced server discovery with HTTPS internet + HTTP local approach
+     * Priority: Internet HTTPS > Local HTTP (preserves existing USB/ADB functionality)
+     */
+    private fun discoverServer() {
+        Log.d(TAG, "=== SERVER DISCOVERY START ===")
+
+        val serverUrls = listOf(
+            "https://representation-broadcasting-delays-cope.trycloudflare.com", // Internet HTTPS (priority)
+            "http://localhost:5000",     // Local HTTP (existing functionality)
+            "http://127.0.0.1:5000"      // Alternative local HTTP
+        )
+
+        for (url in serverUrls) {
+            Log.d(TAG, "Testing connection to: $url")
+
+            if (testServerConnection(url)) {
+                serverBaseUrl = url
+                isServerAvailable = true
+                connectionType = when {
+                    url.startsWith("https://") -> "Internet HTTPS"
+                    url.contains("localhost") || url.contains("127.0.0.1") -> "Local HTTP"
+                    else -> "Unknown"
+                }
+
+                Log.d(TAG, "✅ SUCCESS: Connected via $connectionType")
+                Log.d(TAG, "Server URL: $serverBaseUrl")
+                return
+            }
+        }
+
+        // No connection available
+        isServerAvailable = false
+        serverBaseUrl = ""
+        connectionType = "None"
+        Log.e(TAG, "❌ FAILED: No server connection available")
+
+        Log.d(TAG, "=== SERVER DISCOVERY COMPLETE ===")
+    }
+
+    /**
+     * Test connection to a specific server URL
+     * Handles both HTTPS and HTTP connections appropriately
+     */
+    private fun testServerConnection(url: String): Boolean {
+        return try {
+            val connection = if (url.startsWith("https://")) {
+                URL("$url/api/health").openConnection() as HttpsURLConnection
+            } else {
+                URL("$url/api/health").openConnection() as HttpURLConnection
+            }
+
+            connection.apply {
+                requestMethod = "GET"
+                connectTimeout = 5000  // 5 seconds
+                readTimeout = 5000     // 5 seconds
+                setRequestProperty("User-Agent", "SignalTestEnhanced/1.0")
+            }
 
             val responseCode = connection.responseCode
-            isServerAvailable = responseCode == 200
-            serverBaseUrl = if (isServerAvailable) "http://localhost:5000" else ""
+            val success = responseCode == 200
 
-            Log.d(TAG, "Server connection check: $responseCode, available: $isServerAvailable")
+            Log.d(TAG, "Connection test result: $responseCode (${if (success) "SUCCESS" else "FAILED"})")
+
+            connection.disconnect()
+            success
+
         } catch (e: Exception) {
-            isServerAvailable = false
-            Log.e(TAG, "Server connection failed: ${e.message}")
+            Log.e(TAG, "Connection test failed for $url: ${e.message}")
+            false
         }
     }
 
     private fun sendDataToServer() {
-        if (!isServerAvailable || lastLocation == null) return
+        if (!isServerAvailable || lastLocation == null) {
+            Log.w(TAG, "Cannot send data: server=${isServerAvailable}, location=${lastLocation != null}")
+            return
+        }
 
         thread {
             try {
@@ -684,24 +743,37 @@ class MainActivity : AppCompatActivity(), LocationListener {
                     put("carrier", currentCarrier)
                     put("timestamp", System.currentTimeMillis())
                     put("is_5g_active", is5GActive)
+                    put("connection_type", connectionType)  // Track how we're connected
                 }
 
-                val url = URL("$serverBaseUrl/api/signal")
-                val connection = url.openConnection() as HttpURLConnection
-                connection.requestMethod = "POST"
-                connection.setRequestProperty("Content-Type", "application/json")
-                connection.doOutput = true
+                // Use appropriate connection type based on server URL
+                val connection = if (serverBaseUrl.startsWith("https://")) {
+                    URL("$serverBaseUrl/api/signal").openConnection() as HttpsURLConnection
+                } else {
+                    URL("$serverBaseUrl/api/signal").openConnection() as HttpURLConnection
+                }
+
+                connection.apply {
+                    requestMethod = "POST"
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("User-Agent", "SignalTestEnhanced/1.0")
+                    connectTimeout = 10000  // 10 seconds for data upload
+                    readTimeout = 10000
+                    doOutput = true
+                }
 
                 OutputStreamWriter(connection.outputStream).use { writer ->
                     writer.write(data.toString())
                 }
 
                 val responseCode = connection.responseCode
-                Log.d(TAG, "Data sent to server, response: $responseCode")
+                Log.d(TAG, "Data sent via $connectionType, response: $responseCode")
 
                 runOnUiThread {
-                    statusText.text = "📡 Data sent to server, response: $responseCode"
+                    statusText.text = "📡 Data sent via $connectionType (${responseCode})"
                 }
+
+                connection.disconnect()
 
             } catch (e: Exception) {
                 Log.e(TAG, "Error sending data to server: ${e.message}")
