@@ -660,7 +660,7 @@ class MainActivity : AppCompatActivity(), LocationListener {
         Log.d(TAG, "=== SERVER DISCOVERY START ===")
 
         val serverUrls = listOf(
-            "https://representation-broadcasting-delays-cope.trycloudflare.com", // Internet HTTPS (priority)
+            "https://includes-evaluations-ball-away.trycloudflare.com", // Internet HTTPS (priority )", // Internet HTTPS (priority)
             "http://localhost:5000",     // Local HTTP (existing functionality)
             "http://127.0.0.1:5000"      // Alternative local HTTP
         )
