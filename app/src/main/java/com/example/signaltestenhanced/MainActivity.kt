@@ -1,6 +1,5 @@
 package com.example.signaltestenhanced
 
-
 import android.Manifest
 import android.annotation.SuppressLint
 import android.content.Context
@@ -30,16 +29,11 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
-import java.io.BufferedReader
-import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
 import javax.net.ssl.HttpsURLConnection
 import kotlin.concurrent.thread
-import java.util.concurrent.Executors
-import java.util.concurrent.TimeUnit
-import java.text.DecimalFormat
 
 class MainActivity : AppCompatActivity(), LocationListener {
 
@@ -87,11 +81,6 @@ class MainActivity : AppCompatActivity(), LocationListener {
     private var is5GActive = false
     private var phoneStateListener: PhoneStateListener? = null
 
-    // Speed Test Variables
-    private var isSpeedTestRunning = false
-    private var speedTestQueueId: String? = null
-    private var speedTestExecutor = Executors.newSingleThreadExecutor()
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -109,6 +98,15 @@ class MainActivity : AppCompatActivity(), LocationListener {
             setPadding(32, 32, 32, 32)
         }
 
+        // App Title
+        val titleText = TextView(this).apply {
+            text = "SignalTestEnhanced - Internet Ready"
+            textSize = 24f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, 0, 0, 40)
+        }
+        layout.addView(titleText)
+
         // Device Info
         deviceInfoText = TextView(this).apply {
             text = "Device Info: Loading..."
@@ -119,93 +117,152 @@ class MainActivity : AppCompatActivity(), LocationListener {
 
         // GPS Info
         gpsInfoText = TextView(this).apply {
-            text = "GPS: Waiting for location..."
+            text = "GPS: Not available"
             textSize = 14f
             setPadding(0, 0, 0, 16)
         }
         layout.addView(gpsInfoText)
 
-        // Network Status with Icons
-        val networkLayout = LinearLayout(this).apply {
+        // Network Status Icons Section
+        val networkSectionTitle = TextView(this).apply {
+            text = "📶 Network Status"
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, 20, 0, 16)
+        }
+        layout.addView(networkSectionTitle)
+
+        // Icons Container
+        val iconsContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             setPadding(0, 0, 0, 16)
         }
 
+        // 5G Icon Container
+        val fiveGContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setPadding(16, 0, 16, 0)
+        }
+
         fiveGIcon = TextView(this).apply {
             text = "5G"
-            textSize = 16f
-            setPadding(0, 0, 16, 0)
+            textSize = 20f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            textAlignment = TextView.TEXT_ALIGNMENT_CENTER
             setTextColor(ContextCompat.getColor(this@MainActivity, android.R.color.darker_gray))
+            background = ContextCompat.getDrawable(this@MainActivity, android.R.drawable.btn_default)
+            setPadding(16, 16, 16, 16)
         }
-        networkLayout.addView(fiveGIcon)
+        fiveGContainer.addView(fiveGIcon)
+
+        val fiveGLabel = TextView(this).apply {
+            text = "5G Network"
+            textSize = 12f
+            textAlignment = TextView.TEXT_ALIGNMENT_CENTER
+            setPadding(0, 8, 0, 0)
+        }
+        fiveGContainer.addView(fiveGLabel)
+
+        // 4G Icon Container
+        val fourGContainer = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
+            setPadding(16, 0, 16, 0)
+        }
 
         fourGIcon = TextView(this).apply {
             text = "4G"
-            textSize = 16f
-            setPadding(0, 0, 16, 0)
-            setTextColor(ContextCompat.getColor(this@MainActivity, android.R.color.darker_gray))
+            textSize = 20f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            textAlignment = TextView.TEXT_ALIGNMENT_CENTER
+            setTextColor(ContextCompat.getColor(this@MainActivity, android.R.color.holo_green_dark))
+            background = ContextCompat.getDrawable(this@MainActivity, android.R.drawable.btn_default)
+            setPadding(16, 16, 16, 16)
         }
-        networkLayout.addView(fourGIcon)
+        fourGContainer.addView(fourGIcon)
 
+        val fourGLabel = TextView(this).apply {
+            text = "4G/LTE"
+            textSize = 12f
+            textAlignment = TextView.TEXT_ALIGNMENT_CENTER
+            setPadding(0, 8, 0, 0)
+        }
+        fourGContainer.addView(fourGLabel)
+
+        iconsContainer.addView(fiveGContainer)
+        iconsContainer.addView(fourGContainer)
+        layout.addView(iconsContainer)
+
+        // Network Status Text
         networkStatusText = TextView(this).apply {
             text = "Network: Detecting..."
             textSize = 14f
-        }
-        networkLayout.addView(networkStatusText)
-
-        layout.addView(networkLayout)
-
-        // 4G Signal
-        signal4gText = TextView(this).apply {
-            text = "4G Signal: Waiting..."
-            textSize = 14f
             setPadding(0, 0, 0, 16)
+        }
+        layout.addView(networkStatusText)
+
+        // Signal Info Section
+        val signalSectionTitle = TextView(this).apply {
+            text = "📊 Signal Strength"
+            textSize = 18f
+            setTypeface(null, android.graphics.Typeface.BOLD)
+            setPadding(0, 20, 0, 16)
+        }
+        layout.addView(signalSectionTitle)
+
+        signal4gText = TextView(this).apply {
+            text = "4G Signal: --"
+            textSize = 16f
+            setPadding(0, 0, 0, 8)
         }
         layout.addView(signal4gText)
 
-        // 5G Signal
         signal5gText = TextView(this).apply {
-            text = "5G Signal: Waiting..."
-            textSize = 14f
-            setPadding(0, 0, 0, 16)
+            text = "5G Signal: Not detected"
+            textSize = 16f
+            setPadding(0, 0, 0, 8)
         }
         layout.addView(signal5gText)
 
-        // General Signal
         generalSignalText = TextView(this).apply {
-            text = "General Signal: Waiting..."
+            text = "General Signal: --"
             textSize = 14f
             setPadding(0, 0, 0, 16)
         }
         layout.addView(generalSignalText)
 
-        // Status
-        statusText = TextView(this).apply {
-            text = "Status: Ready"
-            textSize = 14f
-            setPadding(0, 0, 0, 32)
-        }
-        layout.addView(statusText)
-
-        // Buttons
-        val buttonLayout = LinearLayout(this).apply {
+        // Control Buttons
+        val buttonContainer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
+            setPadding(0, 20, 0, 16)
         }
 
         startButton = Button(this).apply {
-            text = "Start Monitoring"
+            text = "START MONITORING"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { startMonitoring() }
         }
-        buttonLayout.addView(startButton)
+        buttonContainer.addView(startButton)
 
         stopButton = Button(this).apply {
-            text = "Stop Monitoring"
+            text = "STOP MONITORING"
+            layoutParams = LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f)
             setOnClickListener { stopMonitoring() }
             isEnabled = false
         }
-        buttonLayout.addView(stopButton)
+        buttonContainer.addView(stopButton)
 
-        layout.addView(buttonLayout)
+        layout.addView(buttonContainer)
+
+        // Status
+        statusText = TextView(this).apply {
+            text = "Ready to start monitoring"
+            textSize = 14f
+            textAlignment = TextView.TEXT_ALIGNMENT_CENTER
+        }
+        layout.addView(statusText)
+
         setContentView(layout)
     }
 
@@ -215,20 +272,280 @@ class MainActivity : AppCompatActivity(), LocationListener {
         wifiManager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
 
         deviceId = Settings.Secure.getString(contentResolver, Settings.Secure.ANDROID_ID)
-        Log.d(TAG, "Device ID: $deviceId")
 
         updateDeviceInfo()
-        setup5GDetection()
-        detectServerConfiguration()
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun setupTelephonyListener() {
+        if (!hasPhonePermission()) {
+            Log.w(TAG, "Phone permission not granted, cannot setup telephony listener")
+            return
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                phoneStateListener = object : PhoneStateListener() {
+                    @Suppress("DEPRECATION")
+                    override fun onDisplayInfoChanged(telephonyDisplayInfo: TelephonyDisplayInfo) {
+                        super.onDisplayInfoChanged(telephonyDisplayInfo)
+
+                        Log.d(TAG, "=== TELEPHONY DISPLAY INFO CHANGED ===")
+
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                            try {
+                                val networkType = if (Build.VERSION.SDK_INT >= 30) {
+                                    telephonyDisplayInfo.networkType
+                                } else {
+                                    -1
+                                }
+
+                                val overrideNetworkType = if (Build.VERSION.SDK_INT >= 30) {
+                                    telephonyDisplayInfo.overrideNetworkType
+                                } else {
+                                    -1
+                                }
+
+                                Log.d(TAG, "Network Type: $networkType")
+                                Log.d(TAG, "Override Network Type: $overrideNetworkType")
+
+                                handleDisplayInfoChanged(networkType, overrideNetworkType)
+
+                            } catch (e: Exception) {
+                                Log.e(TAG, "Error reading TelephonyDisplayInfo: ${e.message}")
+                            }
+                        }
+                    }
+                }
+
+                telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_DISPLAY_INFO_CHANGED)
+                Log.d(TAG, "PhoneStateListener with DisplayInfo registered")
+
+            } else {
+                Log.w(TAG, "TelephonyDisplayInfo not available on Android < 11, using fallback detection")
+            }
+
+        } catch (e: SecurityException) {
+            Log.e(TAG, "SecurityException setting up telephony listener: ${e.message}")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting up telephony listener: ${e.message}")
+        }
+    }
+
+    private fun handleDisplayInfoChanged(networkType: Int, overrideNetworkType: Int) {
+        val was5GActive = is5GActive
+
+        is5GActive = if (Build.VERSION.SDK_INT >= 30) {
+            when (overrideNetworkType) {
+                1, 3, 4 -> {
+                    Log.d(TAG, "5G NSA/Advanced detected via TelephonyDisplayInfo!")
+                    true
+                }
+                else -> {
+                    Log.d(TAG, "No 5G override detected, checking base network type")
+                    networkType == TelephonyManager.NETWORK_TYPE_NR
+                }
+            }
+        } else {
+            networkType == TelephonyManager.NETWORK_TYPE_NR
+        }
+
+        Log.d(TAG, "5G Status: was=$was5GActive, now=$is5GActive")
+
+        if (was5GActive != is5GActive) {
+            runOnUiThread {
+                updateNetworkIcons()
+                updateSignalInfo()
+            }
+        }
+    }
+
+    private fun hasPhonePermission(): Boolean {
+        return ContextCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED
+    }
+
+    private fun updateNetworkIcons() {
+        runOnUiThread {
+            if (is5GActive) {
+                fiveGIcon.setTextColor(ContextCompat.getColor(this, android.R.color.holo_green_dark))
+                fourGIcon.setTextColor(ContextCompat.getColor(this, android.R.color.darker_gray))
+                networkStatusText.text = "Network: 5G NSA Active"
+                Log.d(TAG, "UI Updated: 5G ACTIVE (Green 5G, Grey 4G)")
+            } else {
+                fiveGIcon.setTextColor(ContextCompat.getColor(this, android.R.color.darker_gray))
+                fourGIcon.setTextColor(ContextCompat.getColor(this, android.R.color.holo_green_dark))
+                networkStatusText.text = "Network: 4G/LTE Active"
+                Log.d(TAG, "UI Updated: 4G ONLY (Grey 5G, Green 4G)")
+            }
+        }
+    }
+
+    private fun updateDeviceInfo() {
+        val model = Build.MODEL
+        val androidVersion = Build.VERSION.RELEASE
+
+        runOnUiThread {
+            deviceInfoText.text = "Device ID: ${deviceId.take(12)}...\nModel: $model\nAndroid: $androidVersion (API ${Build.VERSION.SDK_INT})"
+        }
+    }
+
+    @SuppressLint("MissingPermission")
+    private fun updateSignalInfo() {
+        try {
+            Log.d(TAG, "=== SIGNAL UPDATE START ===")
+
+            if (!hasPhonePermission()) {
+                Log.w(TAG, "Phone permission not granted, cannot read signal info")
+                runOnUiThread {
+                    signal4gText.text = "4G Signal: Permission required"
+                    signal5gText.text = "5G Signal: Permission required"
+                    generalSignalText.text = "Phone permission required"
+                }
+                return
+            }
+
+            val cellInfoList = telephonyManager.allCellInfo
+            var has4G = false
+            var has5GCells = false
+
+            // FIXED: Track the STRONGEST signals instead of last processed
+            var bestSignalStrength4G = -999
+            var bestSignalStrength5G = -999
+            var cellCount4G = 0
+            var cellCount5G = 0
+
+            Log.d(TAG, "CellInfoList: ${if (cellInfoList != null) "Available (${cellInfoList.size} cells)" else "NULL"}")
+
+            cellInfoList?.forEach { cellInfo ->
+                Log.d(TAG, "Processing cell: ${cellInfo.javaClass.simpleName}")
+
+                when (cellInfo) {
+                    is CellInfoLte -> {
+                        has4G = true
+                        cellCount4G++
+                        val lteSignal = cellInfo.cellSignalStrength as CellSignalStrengthLte
+                        val rsrp = lteSignal.rsrp
+                        if (rsrp != Int.MAX_VALUE && rsrp < 0) {
+                            Log.d(TAG, "Valid 4G signal: ${rsrp}dBm")
+
+                            // FIXED: Keep the STRONGEST signal (closest to 0)
+                            if (bestSignalStrength4G == -999 || rsrp > bestSignalStrength4G) {
+                                bestSignalStrength4G = rsrp
+                                Log.d(TAG, "NEW BEST 4G signal: ${rsrp}dBm")
+                            }
+                        }
+                    }
+                    is CellInfoNr -> {
+                        has5GCells = true
+                        cellCount5G++
+                        val nrSignal = cellInfo.cellSignalStrength as CellSignalStrengthNr
+                        val ssRsrp = nrSignal.ssRsrp
+                        if (ssRsrp != Int.MAX_VALUE && ssRsrp < 0) {
+                            Log.d(TAG, "Valid 5G signal: ${ssRsrp}dBm")
+
+                            // FIXED: Keep the STRONGEST signal (closest to 0)
+                            if (bestSignalStrength5G == -999 || ssRsrp > bestSignalStrength5G) {
+                                bestSignalStrength5G = ssRsrp
+                                Log.d(TAG, "NEW BEST 5G signal: ${ssRsrp}dBm")
+                            }
+                        }
+                    }
+                }
+            }
+
+            Log.d(TAG, "Signal Selection Summary:")
+            Log.d(TAG, "  - 4G Cells: $cellCount4G, Best Signal: ${if (bestSignalStrength4G != -999) "${bestSignalStrength4G}dBm" else "None"}")
+            Log.d(TAG, "  - 5G Cells: $cellCount5G, Best Signal: ${if (bestSignalStrength5G != -999) "${bestSignalStrength5G}dBm" else "None"}")
+
+            // Enhanced 5G detection combining multiple methods
+            val dataNetworkType = telephonyManager.dataNetworkType
+            val voiceNetworkType = telephonyManager.voiceNetworkType
+            val is5GByNetworkType = (dataNetworkType == TelephonyManager.NETWORK_TYPE_NR || voiceNetworkType == TelephonyManager.NETWORK_TYPE_NR)
+
+            // Combine detection methods
+            val combined5G = is5GActive || has5GCells || is5GByNetworkType
+
+            Log.d(TAG, "5G Detection Summary:")
+            Log.d(TAG, "  - TelephonyDisplayInfo: $is5GActive")
+            Log.d(TAG, "  - CellInfoNr: $has5GCells")
+            Log.d(TAG, "  - NetworkType: $is5GByNetworkType (data=$dataNetworkType, voice=$voiceNetworkType)")
+            Log.d(TAG, "  - Combined Result: $combined5G")
+
+            // Update 5G status based on combined detection
+            if (combined5G != is5GActive) {
+                is5GActive = combined5G
+                runOnUiThread { updateNetworkIcons() }
+            }
+
+            // Fallback signal reading if no valid cell info
+            if (bestSignalStrength4G == -999) {
+                try {
+                    val signalStrength = telephonyManager.signalStrength
+                    signalStrength?.let { ss ->
+                        if (ss.isGsm) {
+                            val gsmSignal = ss.gsmSignalStrength
+                            if (gsmSignal != 99) {
+                                bestSignalStrength4G = -113 + 2 * gsmSignal
+                                Log.d(TAG, "Fallback GSM signal: ${bestSignalStrength4G}dBm")
+                            }
+                        }
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error reading fallback signal: ${e.message}")
+                }
+            }
+
+            currentCarrier = telephonyManager.networkOperatorName ?: "Unknown"
+
+            // Network type determination
+            currentNetworkType = when {
+                is5GActive -> "5G NSA"
+                has5GCells -> "5G NR"
+                dataNetworkType == TelephonyManager.NETWORK_TYPE_LTE -> "LTE"
+                else -> "Unknown"
+            }
+
+            // FIXED: Use the BEST signal strength available
+            currentSignalStrength = when {
+                is5GActive && bestSignalStrength5G != -999 -> bestSignalStrength5G
+                bestSignalStrength4G != -999 -> bestSignalStrength4G
+                else -> -999
+            }
+
+            Log.d(TAG, "Final Results: Network=$currentNetworkType, Signal=${currentSignalStrength}dBm, Carrier=$currentCarrier")
+
+            runOnUiThread {
+                // Dynamic signal label based on 5G status
+                val signalLabel = if (is5GActive) "4G Anchor Signal" else "4G Signal"
+                signal4gText.text = "$signalLabel: ${if (bestSignalStrength4G != -999) "${bestSignalStrength4G}dBm" else "No Signal"}"
+
+                signal5gText.text = when {
+                    is5GActive && bestSignalStrength5G != -999 -> "5G Signal: ${bestSignalStrength5G}dBm"
+                    is5GActive -> "5G Signal: Active"
+                    has5GCells -> "5G Signal: Detected (CellInfoNr)"
+                    else -> "5G Signal: Not detected"
+                }
+
+                generalSignalText.text = "Network: $currentNetworkType\nCarrier: $currentCarrier\nSignal: ${if (currentSignalStrength != -999) "${currentSignalStrength}dBm" else "No Signal"}"
+            }
+
+            Log.d(TAG, "=== SIGNAL UPDATE COMPLETE ===")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error updating signal info: ${e.message}")
+            runOnUiThread {
+                signal4gText.text = "4G Signal: Error"
+                signal5gText.text = "5G Signal: Error"
+                generalSignalText.text = "Error reading signal data"
+            }
+        }
     }
 
     private fun checkPermissions() {
         val permissions = arrayOf(
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
-            Manifest.permission.READ_PHONE_STATE,
-            Manifest.permission.ACCESS_NETWORK_STATE,
-            Manifest.permission.INTERNET
+            Manifest.permission.READ_PHONE_STATE
         )
 
         val missingPermissions = permissions.filter {
@@ -238,165 +555,96 @@ class MainActivity : AppCompatActivity(), LocationListener {
         if (missingPermissions.isNotEmpty()) {
             ActivityCompat.requestPermissions(this, missingPermissions.toTypedArray(), PERMISSION_REQUEST_CODE)
         } else {
-            startLocationUpdates()
+            initializeLocation()
+            updateSignalInfo()
+            setupTelephonyListener()
         }
     }
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
         if (requestCode == PERMISSION_REQUEST_CODE) {
-            if (grantResults.all { it == PackageManager.PERMISSION_GRANTED }) {
-                startLocationUpdates()
+            val allGranted = grantResults.all { it == PackageManager.PERMISSION_GRANTED }
+            if (allGranted) {
+                initializeLocation()
+                updateSignalInfo()
+                setupTelephonyListener()
             } else {
-                statusText.text = "Status: Permissions required"
+                showErrorDialog("Permissions Required", "This app requires location and phone permissions to function properly.")
             }
         }
     }
 
     @SuppressLint("MissingPermission")
-    private fun startLocationUpdates() {
+    private fun initializeLocation() {
         try {
-            locationManager.requestLocationUpdates(
-                LocationManager.GPS_PROVIDER,
-                5000L,
-                10f,
-                this
-            )
-            statusText.text = "Status: GPS tracking started"
+            if (ContextCompat.checkSelfPermission(this, Manifest.permission.ACCESS_FINE_LOCATION) != PackageManager.PERMISSION_GRANTED) {
+                Log.w(TAG, "Location permission not granted")
+                return
+            }
+
+            if (locationManager.isProviderEnabled(LocationManager.GPS_PROVIDER)) {
+                locationManager.requestLocationUpdates(LocationManager.GPS_PROVIDER, 5000, 10f, this)
+                lastLocation = locationManager.getLastKnownLocation(LocationManager.GPS_PROVIDER)
+                updateLocationDisplay()
+            }
         } catch (e: Exception) {
-            Log.e(TAG, "Error starting location updates", e)
-            statusText.text = "Status: GPS error"
+            Log.e(TAG, "Error initializing location: ${e.message}")
         }
     }
 
-    private fun updateDeviceInfo() {
-        val deviceInfo = StringBuilder()
-        deviceInfo.append("Model: ${Build.MODEL}\n")
-        deviceInfo.append("Manufacturer: ${Build.MANUFACTURER}\n")
-        deviceInfo.append("Android: ${Build.VERSION.RELEASE}\n")
-        deviceInfo.append("API Level: ${Build.VERSION.SDK_INT}\n")
-        deviceInfo.append("Device ID: ${deviceId.take(8)}...")
-
-        if (ActivityCompat.checkSelfPermission(this, Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED) {
-            try {
-                val networkOperator = telephonyManager.networkOperatorName
-                if (networkOperator.isNotEmpty()) {
-                    deviceInfo.append("\nCarrier: $networkOperator")
-                    currentCarrier = networkOperator
-                }
-            } catch (e: Exception) {
-                Log.e(TAG, "Error getting network operator", e)
-            }
-        }
-
-        deviceInfoText.text = deviceInfo.toString()
-    }
-
-    @SuppressLint("MissingPermission")
-    private fun setup5GDetection() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-            phoneStateListener = object : PhoneStateListener() {
-                @Deprecated("Deprecated in Java")
-                override fun onDisplayInfoChanged(telephonyDisplayInfo: TelephonyDisplayInfo) {
-                    super.onDisplayInfoChanged(telephonyDisplayInfo)
-
-                    val networkType = telephonyDisplayInfo.networkType
-                    val overrideNetworkType = telephonyDisplayInfo.overrideNetworkType
-
-                    is5GActive = when (overrideNetworkType) {
-                        TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_NSA,
-                        TelephonyDisplayInfo.OVERRIDE_NETWORK_TYPE_NR_ADVANCED -> true
-                        else -> networkType == TelephonyManager.NETWORK_TYPE_NR
-                    }
-
-                    runOnUiThread {
-                        update5GStatus()
-                    }
-                }
-            }
-
-            try {
-                telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_DISPLAY_INFO_CHANGED)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error setting up 5G detection", e)
-            }
-        }
-    }
-
-    private fun update5GStatus() {
-        if (is5GActive) {
-            fiveGIcon.setTextColor(ContextCompat.getColor(this, android.R.color.holo_green_dark))
-            fourGIcon.setTextColor(ContextCompat.getColor(this, android.R.color.darker_gray))
-            networkStatusText.text = "Network: 5G Active"
-            currentNetworkType = "5G"
-        } else {
-            fiveGIcon.setTextColor(ContextCompat.getColor(this, android.R.color.darker_gray))
-            fourGIcon.setTextColor(ContextCompat.getColor(this, android.R.color.holo_blue_dark))
-            networkStatusText.text = "Network: 4G/LTE"
-            currentNetworkType = "4G/LTE"
-        }
-    }
-
-    private fun detectServerConfiguration() {
-        thread {
-            val testUrls = listOf(
-                "https://signal.manus.chat",
-                "https://signal-test.manus.chat",
-                "http://localhost:5000",
-                "http://192.168.1.100:5000"
-            )
-
-            for (url in testUrls) {
-                try {
-                    val connection = URL("$url/api/health").openConnection() as HttpURLConnection
-                    connection.requestMethod = "GET"
-                    connection.connectTimeout = 3000
-                    connection.readTimeout = 3000
-
-                    if (connection.responseCode == 200) {
-                        serverBaseUrl = url
-                        isServerAvailable = true
-                        connectionType = if (url.startsWith("https")) "HTTPS" else "HTTP"
-
-                        runOnUiThread {
-                            statusText.text = "Status: Server connected ($connectionType)"
-                        }
-
-                        Log.d(TAG, "Server detected: $serverBaseUrl")
-                        break
-                    }
-                } catch (e: Exception) {
-                    Log.d(TAG, "Server test failed for $url: ${e.message}")
-                }
-            }
-
-            if (!isServerAvailable) {
-                runOnUiThread {
-                    statusText.text = "Status: No server available"
-                }
-                Log.w(TAG, "No server configuration found")
+    private fun updateLocationDisplay() {
+        runOnUiThread {
+            lastLocation?.let { location ->
+                gpsInfoText.text = "Lat: ${String.format("%.6f", location.latitude)}\n" +
+                        "Lng: ${String.format("%.6f", location.longitude)}\n" +
+                        "Accuracy: ${String.format("%.1f", location.accuracy)}m"
+            } ?: run {
+                gpsInfoText.text = "GPS: Searching for location..."
             }
         }
     }
 
     private fun startMonitoring() {
-        if (!isServerAvailable) {
-            statusText.text = "Status: Server not available"
-            return
+        if (isMonitoring) return
+
+        thread {
+            discoverServer()
+
+            runOnUiThread {
+                if (isServerAvailable) {
+                    isMonitoring = true
+                    startButton.isEnabled = false
+                    stopButton.isEnabled = true
+                    statusText.text = "📡 Monitoring active via $connectionType..."
+
+                    startPeriodicUpdates()
+                } else {
+                    showErrorDialog("Server Error", "Cannot connect to monitoring server. Please check your internet connection or ensure the local server is running.")
+                }
+            }
         }
+    }
 
-        isMonitoring = true
-        startButton.isEnabled = false
-        stopButton.isEnabled = true
-        statusText.text = "Status: Monitoring active"
+    private fun stopMonitoring() {
+        isMonitoring = false
+        startButton.isEnabled = true
+        stopButton.isEnabled = false
+        statusText.text = "Monitoring stopped"
 
+        monitoringHandler?.removeCallbacks(monitoringRunnable!!)
+        monitoringHandler = null
+        monitoringRunnable = null
+    }
+
+    private fun startPeriodicUpdates() {
         monitoringHandler = Handler(Looper.getMainLooper())
         monitoringRunnable = object : Runnable {
             override fun run() {
                 if (isMonitoring) {
                     updateSignalInfo()
                     sendDataToServer()
-                    checkForQueuedSpeedTests()
                     monitoringHandler?.postDelayed(this, 5000)
                 }
             }
@@ -404,459 +652,163 @@ class MainActivity : AppCompatActivity(), LocationListener {
         monitoringHandler?.post(monitoringRunnable!!)
     }
 
-    private fun stopMonitoring() {
-        isMonitoring = false
-        startButton.isEnabled = true
-        stopButton.isEnabled = false
-        statusText.text = "Status: Monitoring stopped"
+    /**
+     * Enhanced server discovery with HTTPS internet + HTTP local approach
+     * Priority: Internet HTTPS > Local HTTP (preserves existing USB/ADB functionality)
+     */
+    private fun discoverServer() {
+        Log.d(TAG, "=== SERVER DISCOVERY START ===")
 
-        monitoringHandler?.removeCallbacks(monitoringRunnable!!)
-        monitoringHandler = null
-        monitoringRunnable = null
+        val serverUrls = listOf(
+            "https://assurance.signal-monitor.com", // Internet HTTPS (priority )
+
+            "http://localhost:5000",     // Local HTTP (existing functionality)
+            "http://127.0.0.1:5000"      // Alternative local HTTP
+        )
+
+        for (url in serverUrls) {
+            Log.d(TAG, "Testing connection to: $url")
+
+            if (testServerConnection(url)) {
+                serverBaseUrl = url
+                isServerAvailable = true
+                connectionType = when {
+                    url.startsWith("https://") -> "Internet HTTPS"
+                    url.contains("localhost") || url.contains("127.0.0.1") -> "Local HTTP"
+                    else -> "Unknown"
+                }
+
+                Log.d(TAG, "✅ SUCCESS: Connected via $connectionType")
+                Log.d(TAG, "Server URL: $serverBaseUrl")
+                return
+            }
+        }
+
+        // No connection available
+        isServerAvailable = false
+        serverBaseUrl = ""
+        connectionType = "None"
+        Log.e(TAG, "❌ FAILED: No server connection available")
+
+        Log.d(TAG, "=== SERVER DISCOVERY COMPLETE ===")
     }
 
-    @SuppressLint("MissingPermission")
-    private fun updateSignalInfo() {
-        try {
-            val cellInfoList = telephonyManager.allCellInfo
-            var lteCount = 0
-            var nrCount = 0
-            var strongestLteSignal = -999
-            var strongestNrSignal = -999
-
-            cellInfoList?.forEach { cellInfo ->
-                when (cellInfo) {
-                    is CellInfoLte -> {
-                        lteCount++
-                        val signalStrength = cellInfo.cellSignalStrength as CellSignalStrengthLte
-                        val rsrp = signalStrength.rsrp
-                        if (rsrp > strongestLteSignal) {
-                            strongestLteSignal = rsrp
-                        }
-                    }
-                    is CellInfoNr -> {
-                        nrCount++
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-                            val signalStrength = cellInfo.cellSignalStrength as CellSignalStrengthNr
-                            val ssRsrp = signalStrength.ssRsrp
-                            if (ssRsrp > strongestNrSignal) {
-                                strongestNrSignal = ssRsrp
-                            }
-                        }
-                    }
-                }
-            }
-
-            currentSignalStrength = if (is5GActive && strongestNrSignal != -999) {
-                strongestNrSignal
-            } else if (strongestLteSignal != -999) {
-                strongestLteSignal
+    /**
+     * Test connection to a specific server URL
+     * Handles both HTTPS and HTTP connections appropriately
+     */
+    private fun testServerConnection(url: String): Boolean {
+        return try {
+            val connection = if (url.startsWith("https://")) {
+                URL("$url/api/health").openConnection() as HttpsURLConnection
             } else {
-                -999
+                URL("$url/api/health").openConnection() as HttpURLConnection
             }
 
-            runOnUiThread {
-                signal4gText.text = "4G Signal: ${if (strongestLteSignal != -999) "${strongestLteSignal}dBm" else "No signal"} ($lteCount cells)"
-                signal5gText.text = "5G Signal: ${if (strongestNrSignal != -999) "${strongestNrSignal}dBm" else "No signal"} ($nrCount cells)"
-                generalSignalText.text = "Current Signal: ${if (currentSignalStrength != -999) "${currentSignalStrength}dBm" else "No signal"} (${currentNetworkType})"
+            connection.apply {
+                requestMethod = "GET"
+                connectTimeout = 5000  // 5 seconds
+                readTimeout = 5000     // 5 seconds
+                setRequestProperty("User-Agent", "SignalTestEnhanced/1.0")
             }
+
+            val responseCode = connection.responseCode
+            val success = responseCode == 200
+
+            Log.d(TAG, "Connection test result: $responseCode (${if (success) "SUCCESS" else "FAILED"})")
+
+            connection.disconnect()
+            success
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error updating signal info", e)
-            runOnUiThread {
-                signal4gText.text = "4G Signal: Error reading"
-                signal5gText.text = "5G Signal: Error reading"
-                generalSignalText.text = "General Signal: Error reading"
-            }
+            Log.e(TAG, "Connection test failed for $url: ${e.message}")
+            false
         }
     }
 
     private fun sendDataToServer() {
-        if (!isServerAvailable) return
+        if (!isServerAvailable || lastLocation == null) {
+            Log.w(TAG, "Cannot send data: server=${isServerAvailable}, location=${lastLocation != null}")
+            return
+        }
 
         thread {
             try {
-                val jsonData = JSONObject().apply {
+                val data = JSONObject().apply {
                     put("device_id", deviceId)
-                    put("timestamp", System.currentTimeMillis())
+                    put("latitude", lastLocation!!.latitude)
+                    put("longitude", lastLocation!!.longitude)
+                    put("accuracy", lastLocation!!.accuracy)
                     put("signal_strength", currentSignalStrength)
-                    put("network_type", currentNetworkType)
+                    put("network_type", if (is5GActive) "NR" else currentNetworkType)
                     put("carrier", currentCarrier)
+                    put("timestamp", System.currentTimeMillis())
                     put("is_5g_active", is5GActive)
-
-                    lastLocation?.let { location ->
-                        put("latitude", location.latitude)
-                        put("longitude", location.longitude)
-                        put("accuracy", location.accuracy)
-                    }
+                    put("connection_type", connectionType)  // Track how we're connected
                 }
 
-                val url = URL("$serverBaseUrl/api/signal-data")
-                val connection = if (serverBaseUrl.startsWith("https")) {
-                    url.openConnection() as HttpsURLConnection
+                // Use appropriate connection type based on server URL
+                val connection = if (serverBaseUrl.startsWith("https://")) {
+                    URL("$serverBaseUrl/api/signal").openConnection() as HttpsURLConnection
                 } else {
-                    url.openConnection() as HttpURLConnection
+                    URL("$serverBaseUrl/api/signal").openConnection() as HttpURLConnection
                 }
 
                 connection.apply {
                     requestMethod = "POST"
                     setRequestProperty("Content-Type", "application/json")
-                    doOutput = true
-                    connectTimeout = 10000
+                    setRequestProperty("User-Agent", "SignalTestEnhanced/1.0")
+                    connectTimeout = 10000  // 10 seconds for data upload
                     readTimeout = 10000
+                    doOutput = true
                 }
 
                 OutputStreamWriter(connection.outputStream).use { writer ->
-                    writer.write(jsonData.toString())
-                    writer.flush()
+                    writer.write(data.toString())
                 }
 
                 val responseCode = connection.responseCode
-                Log.d(TAG, "Data sent via Internet $connectionType, response: $responseCode")
+                Log.d(TAG, "Data sent via $connectionType, response: $responseCode")
 
-            } catch (e: Exception) {
-                Log.e(TAG, "Error sending data to server", e)
-            }
-        }
-    }
-
-    /**
-     * Step 3: Check for queued speed tests from the dashboard
-     * Polls the queue endpoint to see if a speed test has been requested
-     */
-    private fun checkForQueuedSpeedTests() {
-        if (!isServerAvailable || isSpeedTestRunning) return
-
-        thread {
-            try {
-                val url = URL("$serverBaseUrl/api/devices/$deviceId/speedtest/queue")
-                val connection = if (serverBaseUrl.startsWith("https")) {
-                    url.openConnection() as HttpsURLConnection
-                } else {
-                    url.openConnection() as HttpURLConnection
-                }
-
-                connection.apply {
-                    requestMethod = "GET"
-                    connectTimeout = 5000
-                    readTimeout = 5000
-                }
-
-                val responseCode = connection.responseCode
-                if (responseCode == 200) {
-                    val response = BufferedReader(InputStreamReader(connection.inputStream)).use { reader ->
-                        reader.readText()
-                    }
-
-                    val jsonResponse = JSONObject(response)
-                    val hasQueuedTest = jsonResponse.optBoolean("has_queued_test", false)
-
-                    if (hasQueuedTest) {
-                        val queueId = jsonResponse.optString("queue_id", "")
-                        Log.d(TAG, "Speed test requested from dashboard, queue ID: $queueId")
-
-                        runOnUiThread {
-                            statusText.text = "Status: Speed test requested from dashboard..."
-                        }
-
-                        // Step 4: Execute the speed test
-                        executeSpeedTest(queueId)
-                    } else {
-                        Log.d(TAG, "No queued speed tests found")
-                    }
-                } else {
-                    Log.d(TAG, "Queue check failed with response code: $responseCode")
-                }
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Error checking for queued speed tests", e)
-            }
-        }
-    }
-
-    /**
-     * Step 4: Execute speed test using simple HTTP-based approach
-     * This replaces JSpeedTest with a custom implementation
-     */
-    private fun executeSpeedTest(queueId: String) {
-        if (isSpeedTestRunning) {
-            Log.d(TAG, "Speed test already running, skipping")
-            return
-        }
-
-        isSpeedTestRunning = true
-        speedTestQueueId = queueId
-
-        Log.d(TAG, "Starting speed test execution for queue ID: $queueId")
-
-        runOnUiThread {
-            statusText.text = "Status: Running speed test..."
-        }
-
-        speedTestExecutor.execute {
-            try {
-                val startTime = System.currentTimeMillis()
-
-                // Test download speed
-                val downloadSpeed = measureDownloadSpeed()
-
-                // Test upload speed
-                val uploadSpeed = measureUploadSpeed()
-
-                // Test ping
-                val pingResult = measurePing()
-
-                val endTime = System.currentTimeMillis()
-                val duration = endTime - startTime
-
-                Log.d(TAG, "Speed test completed - Download: ${downloadSpeed}Mbps, Upload: ${uploadSpeed}Mbps, Ping: ${pingResult}ms")
-
-                // Submit results to server
-                submitSpeedTestResults(queueId, downloadSpeed, uploadSpeed, pingResult, duration)
-
-            } catch (e: Exception) {
-                Log.e(TAG, "Speed test execution failed", e)
                 runOnUiThread {
-                    statusText.text = "Status: Speed test failed"
-                }
-            } finally {
-                isSpeedTestRunning = false
-                speedTestQueueId = null
-            }
-        }
-    }
-
-    /**
-     * Measure download speed by downloading test data
-     */
-    private fun measureDownloadSpeed(): Double {
-        return try {
-            val testUrl = "https://speed.cloudflare.com/__down?bytes=10000000" // 10MB test
-            val startTime = System.currentTimeMillis()
-
-            val connection = URL(testUrl).openConnection() as HttpsURLConnection
-            connection.connectTimeout = 30000
-            connection.readTimeout = 30000
-
-            val inputStream = connection.inputStream
-            val buffer = ByteArray(8192)
-            var totalBytes = 0
-            var bytesRead: Int
-
-            while (inputStream.read(buffer).also { bytesRead = it } != -1) {
-                totalBytes += bytesRead
-            }
-
-            val endTime = System.currentTimeMillis()
-            val durationSeconds = (endTime - startTime) / 1000.0
-            val speedMbps = (totalBytes * 8.0) / (durationSeconds * 1_000_000)
-
-            inputStream.close()
-            connection.disconnect()
-
-            Log.d(TAG, "Download test: ${totalBytes} bytes in ${durationSeconds}s = ${speedMbps}Mbps")
-            speedMbps
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Download speed test failed", e)
-            0.0
-        }
-    }
-
-    /**
-     * Measure upload speed by uploading test data
-     */
-    private fun measureUploadSpeed(): Double {
-        return try {
-            val testUrl = "$serverBaseUrl/api/speedtest/upload"
-            val testData = ByteArray(1000000) // 1MB test data
-            testData.fill(65) // Fill with 'A' characters
-
-            val startTime = System.currentTimeMillis()
-
-            val connection = if (serverBaseUrl.startsWith("https")) {
-                URL(testUrl).openConnection() as HttpsURLConnection
-            } else {
-                URL(testUrl).openConnection() as HttpURLConnection
-            }
-
-            connection.apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/octet-stream")
-                doOutput = true
-                connectTimeout = 30000
-                readTimeout = 30000
-            }
-
-            connection.outputStream.use { outputStream ->
-                outputStream.write(testData)
-                outputStream.flush()
-            }
-
-            val responseCode = connection.responseCode
-            val endTime = System.currentTimeMillis()
-
-            if (responseCode == 200) {
-                val durationSeconds = (endTime - startTime) / 1000.0
-                val speedMbps = (testData.size * 8.0) / (durationSeconds * 1_000_000)
-
-                Log.d(TAG, "Upload test: ${testData.size} bytes in ${durationSeconds}s = ${speedMbps}Mbps")
-                speedMbps
-            } else {
-                Log.e(TAG, "Upload test failed with response code: $responseCode")
-                0.0
-            }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Upload speed test failed", e)
-            0.0
-        }
-    }
-
-    /**
-     * Measure ping latency
-     */
-    private fun measurePing(): Double {
-        return try {
-            val testUrl = "$serverBaseUrl/api/ping"
-            var totalPing = 0.0
-            val pingCount = 5
-
-            repeat(pingCount) {
-                val startTime = System.currentTimeMillis()
-
-                val connection = if (serverBaseUrl.startsWith("https")) {
-                    URL(testUrl).openConnection() as HttpsURLConnection
-                } else {
-                    URL(testUrl).openConnection() as HttpURLConnection
-                }
-
-                connection.apply {
-                    requestMethod = "GET"
-                    connectTimeout = 5000
-                    readTimeout = 5000
-                }
-
-                val responseCode = connection.responseCode
-                val endTime = System.currentTimeMillis()
-
-                if (responseCode == 200) {
-                    val pingTime = endTime - startTime
-                    totalPing += pingTime
-                    Log.d(TAG, "Ping ${it + 1}: ${pingTime}ms")
+                    statusText.text = "📡 Data sent via $connectionType (${responseCode})"
                 }
 
                 connection.disconnect()
 
-                // Small delay between pings
-                Thread.sleep(100)
-            }
-
-            val averagePing = totalPing / pingCount
-            Log.d(TAG, "Average ping: ${averagePing}ms")
-            averagePing
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Ping test failed", e)
-            0.0
-        }
-    }
-
-    /**
-     * Submit speed test results to the server
-     */
-    private fun submitSpeedTestResults(queueId: String, downloadSpeed: Double, uploadSpeed: Double, ping: Double, duration: Long) {
-        try {
-            val resultsData = JSONObject().apply {
-                put("queue_id", queueId)
-                put("device_id", deviceId)
-                put("timestamp", System.currentTimeMillis())
-                put("download_speed", downloadSpeed)
-                put("upload_speed", uploadSpeed)
-                put("ping", ping)
-                put("jitter", 0.0) // Placeholder for jitter
-                put("packet_loss", 0.0) // Placeholder for packet loss
-                put("test_duration", duration)
-                put("network_type", currentNetworkType)
-                put("signal_strength", currentSignalStrength)
-
-                lastLocation?.let { location ->
-                    put("latitude", location.latitude)
-                    put("longitude", location.longitude)
-                }
-            }
-
-            val url = URL("$serverBaseUrl/api/devices/$deviceId/speedtest/results")
-            val connection = if (serverBaseUrl.startsWith("https")) {
-                url.openConnection() as HttpsURLConnection
-            } else {
-                url.openConnection() as HttpURLConnection
-            }
-
-            connection.apply {
-                requestMethod = "POST"
-                setRequestProperty("Content-Type", "application/json")
-                doOutput = true
-                connectTimeout = 10000
-                readTimeout = 10000
-            }
-
-            OutputStreamWriter(connection.outputStream).use { writer ->
-                writer.write(resultsData.toString())
-                writer.flush()
-            }
-
-            val responseCode = connection.responseCode
-            if (responseCode == 200 || responseCode == 201) {
-                Log.d(TAG, "Speed test results submitted successfully")
+            } catch (e: Exception) {
+                Log.e(TAG, "Error sending data to server: ${e.message}")
                 runOnUiThread {
-                    statusText.text = "Status: Speed test completed (${formatDecimal(downloadSpeed, 1)}↓ ${formatDecimal(uploadSpeed, 1)}↑ ${formatDecimal(ping, 0)}ms)"
+                    statusText.text = "❌ Server communication error"
                 }
-            } else {
-                Log.e(TAG, "Failed to submit speed test results, response code: $responseCode")
-                runOnUiThread {
-                    statusText.text = "Status: Speed test completed but submission failed"
-                }
-            }
-
-        } catch (e: Exception) {
-            Log.e(TAG, "Error submitting speed test results", e)
-            runOnUiThread {
-                statusText.text = "Status: Speed test completed but submission failed"
             }
         }
     }
 
-    /**
-     * Format double values with specified decimal places
-     */
-    private fun formatDecimal(value: Double, decimals: Int): String {
-        val formatter = DecimalFormat()
-        formatter.maximumFractionDigits = decimals
-        formatter.minimumFractionDigits = decimals
-        return formatter.format(value)
+    private fun showErrorDialog(title: String, message: String) {
+        AlertDialog.Builder(this)
+            .setTitle(title)
+            .setMessage(message)
+            .setPositiveButton("OK") { dialog, _ -> dialog.dismiss() }
+            .show()
     }
 
     override fun onLocationChanged(location: Location) {
         lastLocation = location
-        runOnUiThread {
-            gpsInfoText.text = "GPS: ${formatDecimal(location.latitude, 6)}, ${formatDecimal(location.longitude, 6)} (±${formatDecimal(location.accuracy.toDouble(), 1)}m)"
-        }
+        updateLocationDisplay()
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        stopMonitoring()
-        phoneStateListener?.let {
-            telephonyManager.listen(it, PhoneStateListener.LISTEN_NONE)
-        }
-        speedTestExecutor.shutdown()
+
         try {
-            if (!speedTestExecutor.awaitTermination(5, TimeUnit.SECONDS)) {
-                speedTestExecutor.shutdownNow()
+            if (phoneStateListener != null) {
+                telephonyManager.listen(phoneStateListener, PhoneStateListener.LISTEN_NONE)
             }
-        } catch (e: InterruptedException) {
-            speedTestExecutor.shutdownNow()
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unregistering telephony listener: ${e.message}")
         }
+
+        stopMonitoring()
     }
 }
