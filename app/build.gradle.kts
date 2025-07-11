@@ -58,4 +58,7 @@ dependencies {
     debugImplementation(libs.androidx.ui.test.manifest)
     implementation("androidx.appcompat:appcompat:1.6.1")
 
+    // JSpeedTest library for speed testing functionality
+    implementation("fr.bmartel:jspeedtest:1.32.1")
+
 }
