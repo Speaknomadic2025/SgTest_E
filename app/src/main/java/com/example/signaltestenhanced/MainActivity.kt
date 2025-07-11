@@ -29,6 +29,8 @@ import androidx.appcompat.app.AppCompatActivity
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import org.json.JSONObject
+import java.io.BufferedReader
+import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
@@ -80,6 +82,10 @@ class MainActivity : AppCompatActivity(), LocationListener {
     // 5G Detection
     private var is5GActive = false
     private var phoneStateListener: PhoneStateListener? = null
+
+    // Speed Test Variables
+    private var isSpeedTestRunning = false
+    private var speedTestQueueId: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -645,6 +651,7 @@ class MainActivity : AppCompatActivity(), LocationListener {
                 if (isMonitoring) {
                     updateSignalInfo()
                     sendDataToServer()
+                    checkForQueuedSpeedTests()  // STEP 2: Added speed test polling
                     monitoringHandler?.postDelayed(this, 5000)
                 }
             }
@@ -660,7 +667,8 @@ class MainActivity : AppCompatActivity(), LocationListener {
         Log.d(TAG, "=== SERVER DISCOVERY START ===")
 
         val serverUrls = listOf(
-            "https://includes-evaluations-ball-away.trycloudflare.com", // Internet HTTPS (priority )", // Internet HTTPS (priority)
+            "https://assurance.signal-monitor.com", // Internet HTTPS (priority )
+
             "http://localhost:5000",     // Local HTTP (existing functionality)
             "http://127.0.0.1:5000"      // Alternative local HTTP
         )
@@ -781,6 +789,83 @@ class MainActivity : AppCompatActivity(), LocationListener {
                     statusText.text = "❌ Server communication error"
                 }
             }
+        }
+    }
+
+    /**
+     * Step 3: Check for queued speed tests from the dashboard
+     * This method polls the server for any queued speed tests for this device
+     */
+    private fun checkForQueuedSpeedTests() {
+        if (!isServerAvailable || isSpeedTestRunning) {
+            Log.d(TAG, "Speed test polling skipped: server=${isServerAvailable}, running=${isSpeedTestRunning}")
+            return
+        }
+
+        thread {
+            try {
+                Log.d(TAG, "=== SPEED TEST QUEUE CHECK START ===")
+
+                // Use appropriate connection type based on server URL
+                val connection = if (serverBaseUrl.startsWith("https://")) {
+                    URL("$serverBaseUrl/api/devices/$deviceId/speedtest/queue").openConnection() as HttpsURLConnection
+                } else {
+                    URL("$serverBaseUrl/api/devices/$deviceId/speedtest/queue").openConnection() as HttpURLConnection
+                }
+
+                connection.apply {
+                    requestMethod = "GET"
+                    setRequestProperty("Content-Type", "application/json")
+                    setRequestProperty("User-Agent", "SignalTestEnhanced/1.0")
+                    connectTimeout = 5000  // 5 seconds
+                    readTimeout = 5000
+                }
+
+                val responseCode = connection.responseCode
+                Log.d(TAG, "Queue check response: $responseCode")
+
+                if (responseCode == 200) {
+                    // Read response
+                    val response = BufferedReader(InputStreamReader(connection.inputStream)).use { reader ->
+                        reader.readText()
+                    }
+
+                    Log.d(TAG, "Queue response: $response")
+
+                    // Parse JSON response
+                    val jsonResponse = JSONObject(response)
+                    val hasQueuedTest = jsonResponse.optBoolean("has_queued_test", false)
+
+                    if (hasQueuedTest) {
+                        val queueId = jsonResponse.optString("queue_id", "")
+                        Log.d(TAG, "🚀 SPEED TEST QUEUED! Queue ID: $queueId")
+
+                        // Store queue ID and start speed test
+                        speedTestQueueId = queueId
+                        runOnUiThread {
+                            statusText.text = "🚀 Speed test requested from dashboard..."
+                        }
+
+                        // Step 4 will implement the actual speed test execution here
+                        Log.d(TAG, "Speed test execution will be implemented in Step 4")
+
+                    } else {
+                        Log.d(TAG, "No queued speed tests found")
+                    }
+
+                } else if (responseCode == 404) {
+                    Log.d(TAG, "No speed test queue found for device (404)")
+                } else {
+                    Log.w(TAG, "Unexpected queue check response: $responseCode")
+                }
+
+                connection.disconnect()
+
+            } catch (e: Exception) {
+                Log.e(TAG, "Error checking speed test queue: ${e.message}")
+            }
+
+            Log.d(TAG, "=== SPEED TEST QUEUE CHECK COMPLETE ===")
         }
     }
 
