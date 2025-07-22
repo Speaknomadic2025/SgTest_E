@@ -79,6 +79,10 @@ class MainActivity : AppCompatActivity(), LocationListener {
     private var currentSignalStrength: Int = -999
     private var currentNetworkType: String = "Unknown"
     private var currentCarrier: String = "Unknown"
+    
+    // Enhanced signal metrics (SINR and Cell ID)
+    private var currentCellMetrics: CellMetrics = CellMetrics.empty()
+    private var lastCellMetricsUpdate: Long = 0
 
     // 5G Detection
     private var is5GActive = false
@@ -420,7 +424,7 @@ class MainActivity : AppCompatActivity(), LocationListener {
     @SuppressLint("MissingPermission")
     private fun updateSignalInfo() {
         try {
-            Log.d(TAG, "=== SIGNAL UPDATE START ===")
+            Log.d(TAG, "=== ENHANCED SIGNAL UPDATE START ===")
 
             if (!hasPhonePermission()) {
                 Log.w(TAG, "Phone permission not granted, cannot read signal info")
@@ -432,6 +436,82 @@ class MainActivity : AppCompatActivity(), LocationListener {
                 return
             }
 
+            // Collect enhanced signal metrics in background thread
+            thread {
+                try {
+                    val enhancedMetrics = SignalCollectionUtils.collectEnhancedSignalMetrics(telephonyManager)
+                    
+                    // Update current metrics
+                    currentCellMetrics = enhancedMetrics
+                    lastCellMetricsUpdate = System.currentTimeMillis()
+                    
+                    Log.d(TAG, "Enhanced metrics collected: $enhancedMetrics")
+                    
+                    // Process signal results on UI thread
+                    runOnUiThread {
+                        processSignalResults(enhancedMetrics)
+                    }
+                } catch (e: Exception) {
+                    Log.e(TAG, "Error collecting enhanced signal metrics", e)
+                    // Fallback to basic signal collection
+                    collectBasicSignalInfo()
+                }
+            }
+        } catch (e: Exception) {
+            Log.e(TAG, "Error in updateSignalInfo", e)
+            runOnUiThread {
+                signal4gText.text = "4G Signal: Error"
+                signal5gText.text = "5G Signal: Error"
+                generalSignalText.text = "Signal collection error"
+            }
+        }
+    }
+    
+    private fun processSignalResults(metrics: CellMetrics) {
+        try {
+            // Update signal strength variables
+            currentSignalStrength = when {
+                metrics.is5G && metrics.signalStrength5G != -999 -> metrics.signalStrength5G
+                metrics.signalStrength4G != -999 -> metrics.signalStrength4G
+                else -> -999
+            }
+            
+            currentNetworkType = if (metrics.is5G) "NR" else "LTE"
+            
+            // Update UI with enhanced metrics
+            val signal4GText = if (metrics.signalStrength4G != -999) {
+                val sinrText = if (metrics.sinr4G != -999.0) " | SINR: ${String.format("%.1f", metrics.sinr4G)}dB" else ""
+                val cellIdText = if (metrics.cellId4G != -1) " | Cell: ${metrics.cellId4G}" else ""
+                "4G Signal: ${metrics.signalStrength4G}dBm$sinrText$cellIdText"
+            } else {
+                "4G Signal: Not detected"
+            }
+            
+            val signal5GText = if (metrics.signalStrength5G != -999) {
+                val sinrText = if (metrics.sinr5G != -999.0) " | SINR: ${String.format("%.1f", metrics.sinr5G)}dB" else ""
+                val cellIdText = if (metrics.cellId5G != -1L) " | Cell: ${metrics.cellId5G}" else ""
+                "5G Signal: ${metrics.signalStrength5G}dBm$sinrText$cellIdText"
+            } else {
+                "5G Signal: Not detected"
+            }
+            
+            val generalText = "General Signal: ${currentSignalStrength}dBm (${currentNetworkType})"
+            
+            // Update UI
+            this.signal4gText.text = signal4GText
+            this.signal5gText.text = signal5GText
+            this.generalSignalText.text = generalText
+            
+            Log.d(TAG, "UI updated with enhanced metrics")
+            
+        } catch (e: Exception) {
+            Log.e(TAG, "Error processing signal results", e)
+        }
+    }
+    
+    @SuppressLint("MissingPermission")
+    private fun collectBasicSignalInfo() {
+        try {
             val cellInfoList = telephonyManager.allCellInfo
             var has4G = false
             var has5GCells = false
@@ -761,6 +841,43 @@ class MainActivity : AppCompatActivity(), LocationListener {
                     put("timestamp", System.currentTimeMillis())
                     put("is_5g_active", is5GActive)
                     put("connection_type", connectionType)
+                    
+                    // Enhanced signal metrics (SINR and Cell ID)
+                    if (currentCellMetrics.isValid()) {
+                        // 4G/LTE metrics
+                        if (currentCellMetrics.signalStrength4G != -999) {
+                            put("signal_strength_4g", currentCellMetrics.signalStrength4G)
+                            if (currentCellMetrics.sinr4G != -999.0) {
+                                put("sinr_4g", currentCellMetrics.sinr4G)
+                            }
+                            if (currentCellMetrics.cellId4G != -1) {
+                                put("cell_id_4g", currentCellMetrics.cellId4G)
+                            }
+                            if (currentCellMetrics.pci4G != -1) {
+                                put("pci_4g", currentCellMetrics.pci4G)
+                            }
+                        }
+                        
+                        // 5G/NR metrics
+                        if (currentCellMetrics.signalStrength5G != -999) {
+                            put("signal_strength_5g", currentCellMetrics.signalStrength5G)
+                            if (currentCellMetrics.sinr5G != -999.0) {
+                                put("sinr_5g", currentCellMetrics.sinr5G)
+                            }
+                            if (currentCellMetrics.cellId5G != -1L) {
+                                put("cell_id_5g", currentCellMetrics.cellId5G)
+                            }
+                            if (currentCellMetrics.pci5G != -1) {
+                                put("pci_5g", currentCellMetrics.pci5G)
+                            }
+                        }
+                        
+                        // Metadata
+                        put("enhanced_metrics_available", true)
+                        put("metrics_timestamp", lastCellMetricsUpdate)
+                    } else {
+                        put("enhanced_metrics_available", false)
+                    }
                 }
 
                 val connection = if (serverBaseUrl.startsWith("https://")) {
